@@ -19,6 +19,7 @@ import {
   BillingMode,
   StreamViewType,
   TableProps,
+  TableEncryption,
 } from '@aws-cdk/aws-dynamodb';
 import { Effect, Grant, IGrantable, PolicyStatement } from '@aws-cdk/aws-iam';
 import { IFunction } from '@aws-cdk/aws-lambda';
@@ -439,6 +440,7 @@ export class AppSyncTransformer extends Construct {
     const tableProps: TableProps = {
       tableName,
       billingMode: BillingMode.PAY_PER_REQUEST,
+      encryption: TableEncryption.AWS_MANAGED,
       partitionKey: {
         name: tableData.partitionKey.name,
         type: this.convertAttributeType(tableData.partitionKey.type),
