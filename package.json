@@ -21,7 +21,8 @@
     "compat": "npx projen compat",
     "docgen": "npx projen docgen",
     "projen": "npx projen",
-    "start": "npx projen start"
+    "start": "npx projen start",
+    "prepare": "npm run build"
   },
   "author": {
     "name": "Ken Winner",
