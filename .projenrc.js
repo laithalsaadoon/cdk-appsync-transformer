@@ -85,6 +85,9 @@ const project = new AwsCdkConstructLibrary({
     'graphql-ttl-transformer', // Community transformer
     'graphql-versioned-transformer',
   ],
+  scripts: {
+    ['prepare']: 'npm run compile',
+  },
 });
 
 // Override the @types/node version so dependabot leaves us alone
