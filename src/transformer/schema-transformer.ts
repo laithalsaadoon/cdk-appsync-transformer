@@ -1,13 +1,25 @@
-import * as fs from 'fs';
-import { normalize, join } from 'path';
-import { ModelAuthTransformer, ModelAuthTransformerConfig } from 'graphql-auth-transformer';
-import { ModelConnectionTransformer } from 'graphql-connection-transformer';
-import { DynamoDBModelTransformer } from 'graphql-dynamodb-transformer';
-import { HttpTransformer } from 'graphql-http-transformer';
-import { KeyTransformer } from 'graphql-key-transformer';
-import { GraphQLTransform, TransformConfig, TRANSFORM_CURRENT_VERSION, TRANSFORM_CONFIG_FILE_NAME, ConflictHandlerType, ITransformer } from 'graphql-transformer-core';
-import TtlTransformer from 'graphql-ttl-transformer';
-import { VersionedModelTransformer } from 'graphql-versioned-transformer';
+import * as fs from "fs";
+import { normalize, join } from "path";
+import {
+  ModelAuthTransformer,
+  ModelAuthTransformerConfig,
+} from "graphql-auth-transformer";
+import { ModelConnectionTransformer } from "graphql-connection-transformer";
+import { DynamoDBModelTransformer } from "graphql-dynamodb-transformer";
+import { HttpTransformer } from "graphql-http-transformer";
+import { KeyTransformer } from "graphql-key-transformer";
+import {
+  GraphQLTransform,
+  TransformConfig,
+  TRANSFORM_CURRENT_VERSION,
+  TRANSFORM_CONFIG_FILE_NAME,
+  ConflictHandlerType,
+  ITransformer,
+  FeatureFlagProvider,
+} from "graphql-transformer-core";
+import { NoopFeatureFlagProvider } from "graphql-transformer-core/lib/FeatureFlags";
+import TtlTransformer from "graphql-ttl-transformer";
+import { VersionedModelTransformer } from "graphql-versioned-transformer";
 
 import {
   CdkTransformer,
@@ -15,14 +27,17 @@ import {
   CdkTransformerResolver,
   CdkTransformerFunctionResolver,
   CdkTransformerHttpResolver,
-} from './cdk-transformer';
+} from "./cdk-transformer";
 
 // Rebuilt this from cloudform-types because it has type errors
-import { Resource } from './resource';
+import { Resource } from "./resource";
 
 // Import this way because FunctionTransformer.d.ts types were throwing an eror. And we didn't write this package so hope for the best :P
 // eslint-disable-next-line
-const { FunctionTransformer } = require('graphql-function-transformer');
+const { FunctionTransformer } = require("graphql-function-transformer");
+
+const featureFlags: FeatureFlagProvider = new NoopFeatureFlagProvider();
+featureFlags.getBoolean("improvePluralization", false);
 
 export interface SchemaTransformerProps {
   /**
@@ -53,7 +68,9 @@ export interface SchemaTransformerProps {
 export interface SchemaTransformerOutputs {
   readonly cdkTables?: { [name: string]: CdkTransformerTable };
   readonly noneResolvers?: { [name: string]: CdkTransformerResolver };
-  readonly functionResolvers?: { [name: string]: CdkTransformerFunctionResolver[] };
+  readonly functionResolvers?: {
+    [name: string]: CdkTransformerFunctionResolver[];
+  };
   readonly httpResolvers?: { [name: string]: CdkTransformerHttpResolver[] };
   readonly queries?: { [name: string]: string };
   readonly mutations?: { [name: string]: CdkTransformerResolver };
@@ -61,20 +78,20 @@ export interface SchemaTransformerOutputs {
 }
 
 export class SchemaTransformer {
-  public readonly schemaPath: string
-  public readonly outputPath: string
-  public readonly isSyncEnabled: boolean
+  public readonly schemaPath: string;
+  public readonly outputPath: string;
+  public readonly isSyncEnabled: boolean;
 
-  private readonly authTransformerConfig: ModelAuthTransformerConfig
+  private readonly authTransformerConfig: ModelAuthTransformerConfig;
 
-  outputs: SchemaTransformerOutputs
-  resolvers: any
-  authRolePolicy: Resource | undefined
-  unauthRolePolicy: Resource | undefined
+  outputs: SchemaTransformerOutputs;
+  resolvers: any;
+  authRolePolicy: Resource | undefined;
+  unauthRolePolicy: Resource | undefined;
 
   constructor(props: SchemaTransformerProps) {
-    this.schemaPath = props.schemaPath || './schema.graphql';
-    this.outputPath = props.outputPath || './appsync';
+    this.schemaPath = props.schemaPath || "./schema.graphql";
+    this.outputPath = props.outputPath || "./appsync";
     this.isSyncEnabled = props.syncEnabled || false;
 
     this.outputs = {};
@@ -84,27 +101,28 @@ export class SchemaTransformer {
     this.authTransformerConfig = {
       authConfig: {
         defaultAuthentication: {
-          authenticationType: 'AMAZON_COGNITO_USER_POOLS',
+          authenticationType: "AMAZON_COGNITO_USER_POOLS",
           userPoolConfig: {
-            userPoolId: '12345xyz',
+            userPoolId: "12345xyz",
           },
         },
         additionalAuthenticationProviders: [
           {
-            authenticationType: 'API_KEY',
+            authenticationType: "API_KEY",
             apiKeyConfig: {
-              description: 'Testing',
+              description: "Testing",
               apiKeyExpirationDays: 100,
             },
           },
           {
-            authenticationType: 'AWS_IAM',
+            authenticationType: "AWS_IAM",
           },
           {
-            authenticationType: 'OPENID_CONNECT',
+            authenticationType: "OPENID_CONNECT",
             openIDConnectConfig: {
-              name: 'OIDC',
-              issuerUrl: 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_XXX',
+              name: "OIDC",
+              issuerUrl:
+                "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_XXX",
             },
           },
         ],
@@ -112,7 +130,10 @@ export class SchemaTransformer {
     };
   }
 
-  public transform(preCdkTransformers: ITransformer[] = [], postCdkTransformers: ITransformer[] = []) {
+  public transform(
+    preCdkTransformers: ITransformer[] = [],
+    postCdkTransformers: ITransformer[] = []
+  ) {
     const transformConfig = this.isSyncEnabled ? this.loadConfigSync() : {};
 
     // Note: This is not exact as we are omitting the @searchable transformer as well as some others.
@@ -131,14 +152,17 @@ export class SchemaTransformer {
         new CdkTransformer(),
         ...postCdkTransformers,
       ],
+      featureFlags: featureFlags,
     });
 
     const schema = fs.readFileSync(this.schemaPath);
     const cfdoc = transformer.transform(schema.toString());
 
     // TODO: Get Unauth Role and Auth Role policies for authorization stuff
-    this.unauthRolePolicy = cfdoc.rootStack.Resources?.UnauthRolePolicy01 as Resource || undefined;
-    this.authRolePolicy = cfdoc.rootStack.Resources?.AuthRolePolicy01 as Resource || undefined;
+    this.unauthRolePolicy =
+      (cfdoc.rootStack.Resources?.UnauthRolePolicy01 as Resource) || undefined;
+    this.authRolePolicy =
+      (cfdoc.rootStack.Resources?.AuthRolePolicy01 as Resource) || undefined;
 
     this.writeSchema(cfdoc.schema);
     this.writeResolversToFile(cfdoc.resolvers);
@@ -154,13 +178,13 @@ export class SchemaTransformer {
    * @returns all resolvers
    */
   public getResolvers() {
-    const statements = ['Query', 'Mutation'];
-    const resolversDirPath = normalize('./appsync/resolvers');
+    const statements = ["Query", "Mutation"];
+    const resolversDirPath = normalize("./appsync/resolvers");
     if (fs.existsSync(resolversDirPath)) {
       const files = fs.readdirSync(resolversDirPath);
-      files.forEach(file => {
+      files.forEach((file) => {
         // Example: Mutation.createChannel.response
-        let args = file.split('.');
+        let args = file.split(".");
         let typeName: string = args[0];
         let fieldName: string = args[1];
         let templateType = args[2]; // request or response
@@ -170,12 +194,21 @@ export class SchemaTransformer {
         // same as fieldName only
         let compositeKey = `${typeName}${fieldName}`;
         if (statements.indexOf(typeName) >= 0) {
-          if (!this.outputs.noneResolvers || !this.outputs.noneResolvers[compositeKey]) compositeKey = fieldName;
+          if (
+            !this.outputs.noneResolvers ||
+            !this.outputs.noneResolvers[compositeKey]
+          ) {
+            compositeKey = fieldName;
+          }
         }
 
         let filepath = normalize(`${resolversDirPath}/${file}`);
 
-        if (statements.indexOf(typeName) >= 0 || (this.outputs.noneResolvers && this.outputs.noneResolvers[compositeKey])) {
+        if (
+          statements.indexOf(typeName) >= 0 ||
+          (this.outputs.noneResolvers &&
+            this.outputs.noneResolvers[compositeKey])
+        ) {
           if (!this.resolvers[compositeKey]) {
             this.resolvers[compositeKey] = {
               typeName: typeName,
@@ -183,9 +216,9 @@ export class SchemaTransformer {
             };
           }
 
-          if (templateType === 'req') {
+          if (templateType === "req") {
             this.resolvers[compositeKey].requestMappingTemplate = filepath;
-          } else if (templateType === 'res') {
+          } else if (templateType === "res") {
             this.resolvers[compositeKey].responseMappingTemplate = filepath;
           }
         } else if (this.isHttpResolver(typeName, fieldName)) {
@@ -196,12 +229,13 @@ export class SchemaTransformer {
             };
           }
 
-          if (templateType === 'req') {
+          if (templateType === "req") {
             this.resolvers[compositeKey].requestMappingTemplate = filepath;
-          } else if (templateType === 'res') {
+          } else if (templateType === "res") {
             this.resolvers[compositeKey].responseMappingTemplate = filepath;
           }
-        } else { // This is a GSI
+        } else {
+          // This is a GSI
           if (!this.resolvers.gsi) {
             this.resolvers.gsi = {};
           }
@@ -213,9 +247,9 @@ export class SchemaTransformer {
             };
           }
 
-          if (templateType === 'req') {
+          if (templateType === "req") {
             this.resolvers.gsi[compositeKey].requestMappingTemplate = filepath;
-          } else if (templateType === 'res') {
+          } else if (templateType === "res") {
             this.resolvers.gsi[compositeKey].responseMappingTemplate = filepath;
           }
         }
@@ -236,7 +270,12 @@ export class SchemaTransformer {
 
     for (const endpoint in this.outputs.httpResolvers) {
       for (const resolver of this.outputs.httpResolvers[endpoint]) {
-        if (resolver.typeName === typeName && resolver.fieldName === fieldName) return true;
+        if (
+          resolver.typeName === typeName &&
+          resolver.fieldName === fieldName
+        ) {
+          return true;
+        }
       }
     }
 
@@ -244,9 +283,9 @@ export class SchemaTransformer {
   }
 
   /**
-     * Writes the schema to the output directory for use with @aws-cdk/aws-appsync
-     * @param schema
-     */
+   * Writes the schema to the output directory for use with @aws-cdk/aws-appsync
+   * @param schema
+   */
   private writeSchema(schema: any) {
     if (!fs.existsSync(this.outputPath)) {
       fs.mkdirSync(this.outputPath);
@@ -256,18 +295,18 @@ export class SchemaTransformer {
   }
 
   /**
-     * Writes all the resolvers to the output directory for loading into the datasources later
-     * @param resolvers
-     */
+   * Writes all the resolvers to the output directory for loading into the datasources later
+   * @param resolvers
+   */
   private writeResolversToFile(resolvers: any) {
     if (!fs.existsSync(this.outputPath)) {
       fs.mkdirSync(this.outputPath);
     }
 
-    const resolverFolderPath = normalize(this.outputPath + '/resolvers');
+    const resolverFolderPath = normalize(this.outputPath + "/resolvers");
     if (fs.existsSync(resolverFolderPath)) {
       const files = fs.readdirSync(resolverFolderPath);
-      files.forEach(file => fs.unlinkSync(resolverFolderPath + '/' + file));
+      files.forEach((file) => fs.unlinkSync(resolverFolderPath + "/" + file));
       fs.rmdirSync(resolverFolderPath);
     }
 
@@ -277,28 +316,28 @@ export class SchemaTransformer {
 
     Object.keys(resolvers).forEach((key: any) => {
       const resolver = resolvers[key];
-      const fileName = key.replace('.vtl', '');
+      const fileName = key.replace(".vtl", "");
       const resolverFilePath = normalize(`${resolverFolderPath}/${fileName}`);
       fs.writeFileSync(resolverFilePath, resolver);
     });
   }
 
   /**
-     * @returns {@link TransformConfig}
-    */
-  private loadConfigSync(projectDir: string = 'resources'): TransformConfig {
+   * @returns {@link TransformConfig}
+   */
+  private loadConfigSync(projectDir: string = "resources"): TransformConfig {
     // Initialize the config always with the latest version, other members are optional for now.
     let config: TransformConfig = {
       Version: TRANSFORM_CURRENT_VERSION,
       ResolverConfig: {
         project: {
           ConflictHandler: ConflictHandlerType.OPTIMISTIC,
-          ConflictDetection: 'VERSION',
+          ConflictDetection: "VERSION",
         },
       },
     };
 
-    const configDir = join(__dirname, '..', '..', projectDir);
+    const configDir = join(__dirname, "..", "..", projectDir);
 
     try {
       const configPath = join(configDir, TRANSFORM_CONFIG_FILE_NAME);
